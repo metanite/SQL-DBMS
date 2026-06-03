@@ -27,7 +27,8 @@ class Table(DataObject):
         not_null_keys: Set[str], 
         primary_key: Tuple[str], 
         foreign_keys: Dict[str, Tuple[str, str]],
-        referenced_by: Set[str]=set()
+        referenced_by: Set[str]=set(),
+        indexes: Dict[str, Dict]=None
     ):
         self.table_name = table_name
         self.columns = columns  # key: column name, value: column referencing_type
@@ -35,6 +36,7 @@ class Table(DataObject):
         self.primary_key = primary_key  # tuple of column names (order is important in this project)
         self.foreign_keys = foreign_keys  # key: referencing column name, value: tuple of (referenced table name, referenced column name)
         self.referenced_by = referenced_by  # set of table names that reference this table
+        self.indexes = indexes or {}  # index_name -> {"column": str, "file": str}
         
     def __str__(self):
         info = "\n-----------------------------------------------------------------\n"
@@ -76,6 +78,12 @@ class Table(DataObject):
     def remove_reference(self, table_name):
         self.referenced_by.remove(table_name)
     
+    @classmethod
+    def deserialize(cls, pickled_data):
+        data = pickle.loads(pickled_data)
+        data.setdefault("indexes", {})
+        return cls(**data)
+
 '''
 table = TableSchema(
     table_name="employees",

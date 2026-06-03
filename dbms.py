@@ -5,6 +5,7 @@ from collections import Counter
 from copy import deepcopy
 
 from db_model import Table, Record, DB, MetaDB
+from btree import BTreeIndex
 from utils import *
 from messages import *
 
@@ -113,6 +114,14 @@ class DBMS:
         
         # remove table records (delete all backend files, see DB.remove_files)
         DB(table_name).remove_files()
+        
+        # remove index files
+        if hasattr(table, "indexes") and table.indexes:
+            for idx_info in table.indexes.values():
+                index_path = self.db_dir / idx_info["file"]
+                for path in self.db_dir.glob(index_path.name + "*"):
+                    path.unlink(missing_ok=True)
+        
         self.meta_db.close_db()
         
         return DropSuccess(table_name)
@@ -138,6 +147,178 @@ class DBMS:
         self.meta_db.close_db()
         return output
     
+    
+    # --------------------------------------------------------------------- #
+    #                            Index DDL                                  #
+    # --------------------------------------------------------------------- #
+    
+    def create_index(self, table_name: str, index_name: str, column_name: str):
+        self.meta_db.open_db()
+        table_key = self.meta_db.create_key_from_value(table_name)
+        table = self.meta_db.get(table_key)
+        if not table:
+            raise NoSuchTable()
+        if column_name not in table.columns:
+            raise IndexColumnNotExist(column_name)
+        if hasattr(table, "indexes") and index_name in table.indexes:
+            raise DuplicateIndexError(index_name)
+        
+        # Create and populate B-Tree index
+        index_file = f"{table_name}_{index_name}.idx"
+        index_path = self.db_dir / index_file
+        btree = BTreeIndex(str(index_path))
+        btree.open()
+        
+        table_db = DB(table_name)
+        table_db.open_db()
+        cursor = table_db.create_cursor()
+        pair = cursor.first()
+        while pair:
+            key, value = pair
+            record = Record.deserialize(value)
+            col_value = record.data.get(column_name)
+            if col_value is not None:
+                btree.insert(col_value, key)
+            pair = cursor.next()
+        table_db.discard_cursor(cursor)
+        table_db.close_db()
+        btree.close()
+        
+        # Update table metadata
+        if not hasattr(table, "indexes"):
+            table.indexes = {}
+        table.indexes[index_name] = {"column": column_name, "file": index_file}
+        self.meta_db.put(table_key, table)
+        self.meta_db.close_db()
+        
+        return CreateIndexSuccess(index_name)
+    
+    
+    def drop_index(self, table_name: str, index_name: str):
+        self.meta_db.open_db()
+        table_key = self.meta_db.create_key_from_value(table_name)
+        table = self.meta_db.get(table_key)
+        if not table:
+            raise NoSuchTable()
+        if not hasattr(table, "indexes") or index_name not in table.indexes:
+            raise NoSuchIndex(index_name)
+        
+        # Remove index files
+        index_file = table.indexes[index_name]["file"]
+        index_path = self.db_dir / index_file
+        for path in self.db_dir.glob(index_path.name + "*"):
+            path.unlink(missing_ok=True)
+        
+        # Update metadata
+        del table.indexes[index_name]
+        self.meta_db.put(table_key, table)
+        self.meta_db.close_db()
+        
+        return DropIndexSuccess(index_name)
+    
+    
+    # --------------------------------------------------------------------- #
+    #                            Index helpers                              #
+    # --------------------------------------------------------------------- #
+    
+    def _find_index_predicate(self, table: Table, where_clause: dict):
+        """Traverse a WHERE clause and return (column_name, op, value) if a
+        comparison on an indexed column is found, else None.
+        """
+        condition = where_clause
+        while condition and condition.get("op") is None:
+            for key in ("boolean_terms", "boolean_factors", "boolean_test"):
+                if key in condition:
+                    condition = condition[key]
+                    break
+            else:
+                break
+        
+        if not condition:
+            return None
+        
+        op = condition.get("op")
+        if op in comparison_op_map:
+            left = condition.get("left_operand")
+            right = condition.get("right_operand")
+            if len(left) == 2 and len(right) == 1:
+                tname, cname = left
+                if (not tname or tname == table.table_name) and cname in table.columns:
+                    for idx_info in getattr(table, "indexes", {}).values():
+                        if idx_info["column"] == cname:
+                            return cname, op, right[0]
+            elif len(left) == 1 and len(right) == 2:
+                tname, cname = right
+                if (not tname or tname == table.table_name) and cname in table.columns:
+                    for idx_info in getattr(table, "indexes", {}).values():
+                        if idx_info["column"] == cname:
+                            return cname, op, left[0]
+        elif op == "and":
+            for factor in condition.get("boolean_factors", []):
+                result = self._find_index_predicate(table, factor)
+                if result:
+                    return result
+        return None
+    
+    
+    def _query_btree(self, table: Table, column_name: str, op: str, value):
+        """Query the appropriate B-Tree index and return a set of record keys."""
+        matching_index = None
+        for idx_name, idx_info in table.indexes.items():
+            if idx_info["column"] == column_name:
+                matching_index = idx_name
+                break
+        if not matching_index:
+            return None
+        
+        idx_info = table.indexes[matching_index]
+        btree = BTreeIndex(str(self.db_dir / idx_info["file"]))
+        btree.open()
+        try:
+            if op == "=":
+                return btree.search(value)
+            elif op == "<":
+                return btree.range_search(high=value, high_inclusive=False)
+            elif op == "<=":
+                return btree.range_search(high=value, high_inclusive=True)
+            elif op == ">":
+                return btree.range_search(low=value, low_inclusive=False)
+            elif op == ">=":
+                return btree.range_search(low=value, low_inclusive=True)
+        finally:
+            btree.close()
+        return None
+    
+    
+    def _maintain_indexes_on_insert(self, table: Table, record_key: bytes, data: dict):
+        """Insert the new record into every index defined on *table*."""
+        if not hasattr(table, "indexes") or not table.indexes:
+            return
+        for idx_info in table.indexes.values():
+            col_value = data.get(idx_info["column"])
+            if col_value is not None:
+                btree = BTreeIndex(str(self.db_dir / idx_info["file"]))
+                btree.open()
+                btree.insert(col_value, record_key)
+                btree.close()
+    
+    
+    def _maintain_indexes_on_delete(self, table: Table, record_key: bytes, record_data: dict):
+        """Remove the deleted record from every index defined on *table*."""
+        if not hasattr(table, "indexes") or not table.indexes:
+            return
+        for idx_info in table.indexes.values():
+            col_value = record_data.get(idx_info["column"])
+            if col_value is not None:
+                btree = BTreeIndex(str(self.db_dir / idx_info["file"]))
+                btree.open()
+                btree.delete(col_value, record_key)
+                btree.close()
+    
+    
+    # --------------------------------------------------------------------- #
+    #                              DML                                      #
+    # --------------------------------------------------------------------- #
     
     def insert(self, table_dict: dict, value_list: list):
         table_name = table_dict["table_name"]
@@ -213,6 +394,10 @@ class DBMS:
         if table_db.exists(record_key):
             raise InsertDuplicatePrimaryKeyError()
         table_db.put(record_key, record)
+        
+        # Maintain indexes
+        self._maintain_indexes_on_insert(table, record_key, data)
+        
         table_db.close_db()
         
         return InsertResult()
@@ -226,8 +411,61 @@ class DBMS:
             raise NoSuchTable()
         self.meta_db.close_db()
         
+        # ----------------------------------------------------------------- #
+        #  Try to use an index for the WHERE clause (single-table only)    #
+        # ----------------------------------------------------------------- #
+        indexed_keys = None
+        if where_clause and hasattr(table, "indexes") and table.indexes:
+            predicate = self._find_index_predicate(table, where_clause)
+            if predicate:
+                cname, op, value = predicate
+                indexed_keys = self._query_btree(table, cname, op, value)
+        
         table_db = DB(table_name)
         table_db.open_db()
+        
+        if indexed_keys is not None:
+            success_cnt = 0
+            fail_cnt = 0
+            for key in indexed_keys:
+                record = table_db.get(key)
+                if record is None:
+                    continue
+                satisfies = self._evaluate_condition(deepcopy(where_clause), [table], record.data) if where_clause else True
+                if satisfies == True:
+                    if list(record.referenced_by.values()):
+                        fail_cnt += 1
+                    else:
+                        if record.referencing:
+                            for (referenced_table_name, referenced_column_name), referenced_value_set in record.referencing.items():
+                                for referenced_value in referenced_value_set:
+                                    referenced_table_db = DB(referenced_table_name)
+                                    referenced_table_db.open_db()
+                                    inner_cursor = referenced_table_db.create_cursor()
+                                    key_value_pair = inner_cursor.first()
+                                    while key_value_pair:
+                                        k2, v2 = key_value_pair
+                                        referenced_record = Record.deserialize(v2)
+                                        for column in table.columns:
+                                            if ((table_name, column) in referenced_record.referenced_by and 
+                                                referenced_value in referenced_record.referenced_by[(table_name, column)]):
+                                                referenced_record.remove_referenced_by(table_name, column, referenced_value)
+                                                referenced_table_db.put(k2, referenced_record)
+                                        key_value_pair = inner_cursor.next()
+                                    referenced_table_db.discard_cursor(inner_cursor)
+                                    referenced_table_db.close_db()
+                        
+                        # Maintain indexes before physical delete
+                        self._maintain_indexes_on_delete(table, key, record.data)
+                        
+                        table_db.delete(key)
+                        success_cnt += 1
+            table_db.close_db()
+            return DeleteResult(success_cnt), DeleteReferentialIntegrityPassed(fail_cnt) if fail_cnt else None
+        
+        # ----------------------------------------------------------------- #
+        #  Fall back to full table scan                                     #
+        # ----------------------------------------------------------------- #
         outer_cursor = table_db.create_cursor()
         
         success_cnt = 0
@@ -249,16 +487,20 @@ class DBMS:
                                 inner_cursor = referenced_table_db.create_cursor()
                                 key_value_pair = inner_cursor.first()
                                 while key_value_pair:
-                                    key, value = key_value_pair
-                                    referenced_record = Record.deserialize(value)
+                                    k2, v2 = key_value_pair
+                                    referenced_record = Record.deserialize(v2)
                                     for column in table.columns:
                                         if ((table_name, column) in referenced_record.referenced_by and 
                                             referenced_value in referenced_record.referenced_by[(table_name, column)]):
                                             referenced_record.remove_referenced_by(table_name, column, referenced_value)
-                                            referenced_table_db.put(key, referenced_record)  # update reference
+                                            referenced_table_db.put(k2, referenced_record)
                                     key_value_pair = inner_cursor.next()
                                 referenced_table_db.discard_cursor(inner_cursor)
                                 referenced_table_db.close_db()
+                    
+                    # Maintain indexes before physical delete
+                    self._maintain_indexes_on_delete(table, key, record.data)
+                    
                     table_db.delete_by_cursor(outer_cursor)
                     success_cnt += 1
             key_value_pair = outer_cursor.next()
@@ -369,6 +611,67 @@ class DBMS:
             all_columns.extend(list(table_schema.columns.keys()))
         counter = Counter(all_columns)
         common_columns = set([column for column, count in counter.items() if count > 1])
+        
+        # ----------------------------------------------------------------- #
+        #  Single-table index fast path                                    #
+        # ----------------------------------------------------------------- #
+        if len(tables) == 1:
+            table_name = tables[0]
+            table = table_list[0]
+            indexed_records = None
+            if where_clause and hasattr(table, "indexes") and table.indexes:
+                predicate = self._find_index_predicate(table, where_clause)
+                if predicate:
+                    cname, op, value = predicate
+                    record_keys = self._query_btree(table, cname, op, value)
+                    if record_keys is not None:
+                        table_db = DB(table_name)
+                        table_db.open_db()
+                        indexed_records = []
+                        for key in record_keys:
+                            record = table_db.get(key)
+                            if record:
+                                indexed_records.append(record.data)
+                        table_db.close_db()
+                        # Apply full WHERE filter to be safe
+                        if where_clause and indexed_records:
+                            filtered = []
+                            for rec in indexed_records:
+                                satisfies = self._evaluate_condition(deepcopy(where_clause), [table], rec)
+                                if satisfies == True:
+                                    filtered.append(rec)
+                            indexed_records = filtered
+            
+            if indexed_records is not None:
+                if select_columns:
+                    final_records = []
+                    for record in indexed_records:
+                        final_record = {}
+                        for tname, cname in select_columns:
+                            if tname:
+                                pcol = f"{tname}.{cname}"
+                                try:
+                                    final_record[pcol] = record[pcol]
+                                except KeyError:
+                                    final_record[pcol] = record[cname]
+                            else:
+                                final_record[cname] = record[cname]
+                        final_records.append(final_record)
+                else:
+                    final_records = indexed_records
+                    final_columns = []
+                    for table_schema in table_list:
+                        for column in table_schema.columns:
+                            if column in common_columns:
+                                final_columns.append(f"{table_schema.table_name}.{column}")
+                            else:
+                                final_columns.append(column)
+                
+                return self._format_select_output(final_records, final_columns)
+        
+        # ----------------------------------------------------------------- #
+        #  Multi-table scan (or no usable index)                          #
+        # ----------------------------------------------------------------- #
                     
         all_records_with_table = {}
         for table_name in tables:

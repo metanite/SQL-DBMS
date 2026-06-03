@@ -16,7 +16,7 @@ class SQLTransformer(Transformer):
         }
         self.record = list()  # values to insert
         self.tables = list()
-        self.select_columns = list()  # [(table_name, column_name), ...)] or '*
+        self.select_columns = list()  # [(table_name, column_name), ...)] or '*'
         self.where = dict()  # [(table_name, column_name, operator, value), ...] up to 4 conditions
         
     # assumes the parse tree transforms only one query at a time
@@ -38,6 +38,9 @@ class SQLTransformer(Transformer):
         return items
         
     def table_name(self, items) -> str:
+        return items[0].value.lower()
+    
+    def index_name(self, items) -> str:
         return items[0].value.lower()
     
     def table_element_list(self, items):
@@ -75,6 +78,23 @@ class SQLTransformer(Transformer):
     def column_name_list(self, items):
         return [item for item in items if item != '(' and item != ')']
     
+    def create_index_query(self, items):
+        self.statement = f"{items[0].lower()} {items[1].lower()}"
+        self.table = {
+            "table_name": items[4],
+            "index_name": items[2],
+            "column_name": items[6]
+        }
+        return items
+
+    def drop_index_query(self, items):
+        self.statement = f"{items[0].lower()} {items[1].lower()}"
+        self.table = {
+            "table_name": items[4],
+            "index_name": items[2]
+        }
+        return items
+
     def drop_table_query(self, items):
         self.statement = f"{items[0].lower()} {items[1].lower()}"
         self.table = {
@@ -110,11 +130,15 @@ class SQLTransformer(Transformer):
 
     def insert_query(self, items):
         self.statement = items[0].lower()
+        # insert_query : INSERT INTO table_name [column_name_list] VALUES value_list
+        # With optional: [INSERT, INTO, table_name, column_name_list, VALUES, value_list] (6 items)
+        # Without optional: [INSERT, INTO, table_name, VALUES, value_list] (5 items)
+        has_col_list = len(items) > 5
         self.table = {
             "table_name": items[2],
-            "column_name_list": items[3],
+            "column_name_list": items[3] if has_col_list else None,
         }
-        self.record = items[5]
+        self.record = items[-1]
         return items
     
     def value_list(self, items):
@@ -136,21 +160,27 @@ class SQLTransformer(Transformer):
         self.table = {
             "table_name": items[2]
         }
-        self.where = items[3]
+        self.where = items[3] if len(items) > 3 else None
         return items
     
     def select_query(self, items):
         self.statement = items[0].lower()
         self.select_columns = items[1]
         self.tables = items[2][0]
-        self.where = items[2][1]
+        self.where = items[2][1] if len(items[2]) > 1 else None
         return items
         
     def select_list(self, items):
         return items
     
     def selected_column(self, items):
-        return items[0], items[1]  # table_name, column_name
+        # selected_column : [table_name "."] column_name [AS column_name]
+        # items may contain literal '.' and 'as' tokens from the grammar.
+        # Filter out tokens that are not the actual names.
+        names = [item for item in items if item not in ('.', 'as', None)]
+        if len(names) == 2:
+            return names[0], names[1]   # table_name, column_name
+        return None, names[0]           # no table_name
     
     def table_expression(self, items):
         return items
@@ -195,10 +225,19 @@ class SQLTransformer(Transformer):
             }
     
     def boolean_factor(self, items):
-        return {
-            "op": items[0].lower() if items[0] else items[0],  # "not"
-            "boolean_test": items[1]
-        }
+        # boolean_factor : [NOT] boolean_test
+        # With NOT: [Token('not'), boolean_test] (2 items)
+        # Without NOT: [boolean_test] (1 item)
+        if len(items) == 2:
+            return {
+                "op": items[0].lower() if items[0] else items[0],  # "not"
+                "boolean_test": items[1]
+            }
+        else:
+            return {
+                "op": None,
+                "boolean_test": items[0]
+            }
     
     def boolean_test(self, items):
         return items[0]
@@ -215,9 +254,10 @@ class SQLTransformer(Transformer):
     
     def comp_operand(self, items):
         if len(items) == 1:
-            return (items[0],)  # (comparable_value,)
-        elif len(items) == 2:
-            return (items[0], items[1])  # (table_name, column_name)
+            return (items[0],)  # (comparable_value,) or (column_name,)
+        else:
+            # [table_name "."] column_name -> items may be [table_name, '.', column_name]
+            return (items[0], items[-1])  # (table_name, column_name)
         
     def comp_op(self, items):
         return items[0].value
@@ -232,16 +272,30 @@ class SQLTransformer(Transformer):
         return value
     
     def null_predicate(self, items):
-        null_op, null = items[2]
-        return {
-            "op": null_op,
-            "left_operand": (items[0], items[1]),  # (table_name, column_name)
-            "right_operand": null
-        }
+        # null_predicate : [table_name "."] column_name null_operation
+        # With table_name: [table_name, '.', column_name, null_operation] (4 items)
+        # Without: [column_name, null_operation] (2 items)
+        if len(items) == 4:
+            null_op, null = items[3]
+            return {
+                "op": null_op,
+                "left_operand": (items[0], items[2]),  # (table_name, column_name)
+                "right_operand": null
+            }
+        else:
+            null_op, null = items[1]
+            return {
+                "op": null_op,
+                "left_operand": (None, items[0]),  # (no table_name, column_name)
+                "right_operand": null
+            }
     
     def null_operation(self, items):
-        if items[1]:
-            return "is not", None 
+        # null_operation : IS [NOT] NULL
+        # With NOT: [IS, NOT, NULL] (3 items)
+        # Without: [IS, NULL] (2 items)
+        if len(items) > 2:
+            return "is not", None
         else:
             return "is", None
     

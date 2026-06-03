@@ -31,6 +31,9 @@ REFERENCES : "references"i
 
 DROP : "drop"i
 
+INDEX : "index"i
+ON : "on"i
+
 EXPLAIN: "explain"i
 DESCRIBE : "describe"i
 DESC : "desc"i
@@ -78,6 +81,8 @@ query : create_table_query
       | select_query
       | show_tables_query
       | update_query
+      | create_index_query
+      | drop_index_query
 
 
 // CREATE TABLE
@@ -101,6 +106,14 @@ column_name : IDENTIFIER
 
 // DROP TABLE
 drop_table_query : DROP TABLE table_name
+
+// CREATE INDEX
+index_name : IDENTIFIER
+
+create_index_query : CREATE INDEX index_name ON table_name LP column_name RP
+
+// DROP INDEX
+drop_index_query : DROP INDEX index_name ON table_name
 
 // EXPLAIN
 explain_query : EXPLAIN table_name

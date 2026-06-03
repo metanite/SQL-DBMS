@@ -9,11 +9,9 @@ services:
       # files are backend- and platform-specific binaries (gdbm/ndbm/dumb), so
       # this avoids clashes with host-created files and keeps them out of git.
       - dbdata:/app/DB
-    stdin_open: true   # interactive REPL (docker compose run app)
-    tty: true
-    # For Challenge 2 (client/server) uncomment and pick your port:
-    # ports:
-    #   - "8000:8000"
+    ports:
+      - "5000:5000"
+    command: ["python", "web_ui.py"]
 
 volumes:
   dbdata:

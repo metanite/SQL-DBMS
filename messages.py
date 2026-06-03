@@ -38,7 +38,19 @@ class DeleteReferentialIntegrityPassed(SuccessLog):  # NOTE: optional
     def __init__(self, num_deleted):
         self.num_deleted = num_deleted
         super().__init__(f"'{self.num_deleted}' row(s) are not deleted due to referential integrity")
-        
+
+
+class CreateIndexSuccess(SuccessLog):
+    def __init__(self, index_name):
+        self.index_name = index_name
+        super().__init__(f"Index '{self.index_name}' is created")
+
+
+class DropIndexSuccess(SuccessLog):
+    def __init__(self, index_name):
+        self.index_name = index_name
+        super().__init__(f"Index '{self.index_name}' is dropped")
+
 
 # ---------------------------------------------------------------------------- #
 #                       Failure messages in DBMS                               #
@@ -183,3 +195,24 @@ class WhereColumnNotExist(Exception):
 class WhereAmbiguousReference(Exception):
     def __init__(self):
         super().__init__(f"Where clause contains ambiguous reference")
+
+
+class DuplicateIndexError(Exception):
+    """Raised when an index with the same name already exists on the table."""
+    def __init__(self, index_name):
+        self.index_name = index_name
+        super().__init__(f"Create index has failed: index with the same name already exists")
+
+
+class NoSuchIndex(Exception):
+    """Raised when the index does not exist."""
+    def __init__(self, index_name):
+        self.index_name = index_name
+        super().__init__(f"Drop index has failed: '{index_name}' does not exist")
+
+
+class IndexColumnNotExist(Exception):
+    """Raised when the column for an index does not exist in the table."""
+    def __init__(self, column_name):
+        self.column_name = column_name
+        super().__init__(f"Create index has failed: '{column_name}' does not exist")

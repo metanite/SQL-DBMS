@@ -45,13 +45,20 @@ def main():
                 elif statement == "select":
                     output = dbms.select(tables, select_columns, where)
                     print(PROMPT + output)
+                elif statement == "create index":
+                    success = dbms.create_index(table["table_name"], table["index_name"], table["column_name"])
+                    print(PROMPT + str(success))
+                elif statement == "drop index":
+                    success = dbms.drop_index(table["table_name"], table["index_name"])
+                    print(PROMPT + str(success))
             except (SyntaxError, NoSuchTable, DuplicateColumnDefError, DuplicatePrimaryKeyDefError, 
                     ReferenceTypeError, ReferenceNonPrimaryKeyError, ReferenceColumnExistenceError, ReferenceTableExistenceError, 
                     NonExistingColumnDefError, TableExistenceError, CharLengthError, DropReferencedTableError, 
                     InsertTypeMismatchError, InsertColumnExistenceError, InsertColumnNonNullableError,
                     InsertDuplicatePrimaryKeyError, InsertReferentialIntegrityError,
                     SelectTableExistenceError, SelectColumnResolveError, 
-                    WhereIncomparableError, WhereTableNotSpecified, WhereColumnNotExist, WhereAmbiguousReference) as e:
+                    WhereIncomparableError, WhereTableNotSpecified, WhereColumnNotExist, WhereAmbiguousReference,
+                    DuplicateIndexError, NoSuchIndex, IndexColumnNotExist) as e:
                 print(PROMPT + str(e))
                 break
             
