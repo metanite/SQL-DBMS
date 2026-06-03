@@ -44,6 +44,20 @@ docker compose run --rm app python run.py
 ```
 You will see a `DB_2023-12345>` prompt where you can type SQL statements.
 
+**Running SQL from a file**
+```bash
+# Execute a .sql file directly (non-interactive)
+python run.py path/to/script.sql
+
+# Or inside the REPL
+DB_2023-12345> \source path/to/script.sql
+```
+
+File execution supports:
+- `--` and `#` line comments, plus `/* */` block comments
+- Multiple statements separated by semicolons
+- Continue-on-error behavior (logs each error and proceeds to the next statement)
+
 **2. Web UI** (`web_ui.py` — Flask app on port 5000)
 ```bash
 docker compose up        # start the web UI (Ctrl+C to stop)
