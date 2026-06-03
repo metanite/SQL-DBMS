@@ -51,14 +51,31 @@ def main():
                 elif statement == "drop index":
                     success = dbms.drop_index(table["table_name"], table["index_name"])
                     print(PROMPT + str(success))
-            except (SyntaxError, NoSuchTable, DuplicateColumnDefError, DuplicatePrimaryKeyDefError, 
-                    ReferenceTypeError, ReferenceNonPrimaryKeyError, ReferenceColumnExistenceError, ReferenceTableExistenceError, 
-                    NonExistingColumnDefError, TableExistenceError, CharLengthError, DropReferencedTableError, 
+                elif statement == "begin transaction":
+                    result = dbms.begin_transaction()
+                    print(PROMPT + str(result))
+                elif statement == "commit":
+                    result = dbms.commit()
+                    print(PROMPT + str(result))
+                elif statement == "rollback":
+                    result = dbms.rollback()
+                    print(PROMPT + str(result))
+                elif statement == "update":
+                    result, extra = dbms.update(table["table_name"], record, where)
+                    print(PROMPT + str(result))
+                    if extra:
+                        print(PROMPT + str(extra))
+            except (SyntaxError, NoSuchTable, DuplicateColumnDefError, DuplicatePrimaryKeyDefError,
+                    ReferenceTypeError, ReferenceNonPrimaryKeyError, ReferenceColumnExistenceError, ReferenceTableExistenceError,
+                    NonExistingColumnDefError, TableExistenceError, CharLengthError, DropReferencedTableError,
                     InsertTypeMismatchError, InsertColumnExistenceError, InsertColumnNonNullableError,
                     InsertDuplicatePrimaryKeyError, InsertReferentialIntegrityError,
-                    SelectTableExistenceError, SelectColumnResolveError, 
+                    SelectTableExistenceError, SelectColumnResolveError,
                     WhereIncomparableError, WhereTableNotSpecified, WhereColumnNotExist, WhereAmbiguousReference,
-                    DuplicateIndexError, NoSuchIndex, IndexColumnNotExist) as e:
+                    DuplicateIndexError, NoSuchIndex, IndexColumnNotExist,
+                    NoActiveTransaction, TransactionAlreadyActive,
+                    UpdateTypeMismatchError, UpdateColumnExistenceError, UpdateColumnNonNullableError,
+                    UpdateDuplicatePrimaryKeyError, UpdateReferentialIntegrityError) as e:
                 print(PROMPT + str(e))
                 break
             

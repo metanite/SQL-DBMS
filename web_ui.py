@@ -37,6 +37,8 @@ from messages import (
     DuplicateIndexError,
     NoSuchIndex,
     IndexColumnNotExist,
+    NoActiveTransaction,
+    TransactionAlreadyActive,
 )
 from sql_transformer import SQLTransformer
 from lark import Lark, Transformer
@@ -117,6 +119,21 @@ def _run_single_query(raw_query: str):
             "type": "text",
             "content": str(dbms.drop_index(table["table_name"], table["index_name"])),
         }
+
+    elif statement == "begin transaction":
+        return {"type": "text", "content": str(dbms.begin_transaction())}
+
+    elif statement == "commit":
+        return {"type": "text", "content": str(dbms.commit())}
+
+    elif statement == "rollback":
+        return {"type": "text", "content": str(dbms.rollback())}
+
+    elif statement == "update":
+        table_name = table["table_name"] if table else None
+        assignments = record if record else []
+        result, extra = dbms.update(table_name, assignments, where)
+        return {"type": "text", "content": str(result) + ("\n" + str(extra) if extra else "")}
 
     elif statement == "exit":
         return {"type": "exit", "content": "Goodbye!"}
@@ -265,6 +282,13 @@ def api_execute():
             DuplicateIndexError,
             NoSuchIndex,
             IndexColumnNotExist,
+            NoActiveTransaction,
+            TransactionAlreadyActive,
+            UpdateTypeMismatchError,
+            UpdateColumnExistenceError,
+            UpdateColumnNonNullableError,
+            UpdateDuplicatePrimaryKeyError,
+            UpdateReferentialIntegrityError,
         ) as e:
             results.append({"query": query_str, "ok": False, "error": str(e)})
             break  # Stop on first error, matching run.py behavior

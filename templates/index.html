@@ -352,9 +352,10 @@
         <div class="query-tabs" id="queryTabs"></div>
         <div class="toolbar">
           <button onclick="executeQuery()">▶ Execute</button>
+          <button class="secondary" onclick="executeAllQueries()">Execute All</button>
           <button class="secondary" onclick="clearEditor()">Clear</button>
           <div class="spacer"></div>
-          <span class="shortcut">Ctrl+Enter to run</span>
+          <span class="shortcut">Ctrl+Enter to run current</span>
         </div>
         <textarea id="editor" placeholder="-- Type your SQL here
 -- Example: SELECT * FROM account;
@@ -487,8 +488,48 @@
     }
 
     // ── Query execution ──────────────────────────────────────────────────────
+    function getActiveQuery() {
+      const text = editor.value;
+      const selStart = editor.selectionStart;
+      const selEnd = editor.selectionEnd;
+
+      // Use selection if present and non-empty
+      if (selStart !== selEnd) {
+        const selected = text.substring(selStart, selEnd).trim();
+        if (selected) return selected;
+      }
+
+      // Find the current query at cursor position (split by semicolons)
+      let currentStart = 0;
+      for (let i = 0; i <= text.length; i++) {
+        if (i === text.length || text[i] === ';') {
+          const segmentEnd = i === text.length ? i : i + 1;
+          if (selStart >= currentStart && selStart <= segmentEnd) {
+            const query = text.substring(currentStart, segmentEnd).trim();
+            if (/[^;\s]/.test(query)) return query;
+          }
+          currentStart = segmentEnd;
+        }
+      }
+
+      // Fallback: return the last non-empty statement
+      const queries = text.split(';').map(q => q.trim()).filter(q => /[^;\s]/.test(q));
+      if (queries.length) return queries[queries.length - 1];
+
+      return text.trim();
+    }
+
     async function executeQuery() {
+      const query = getActiveQuery();
+      await _runQuery(query, 'current');
+    }
+
+    async function executeAllQueries() {
       const query = editor.value.trim();
+      await _runQuery(query, 'all');
+    }
+
+    async function _runQuery(query, mode) {
       if (!query) return;
 
       status.textContent = 'Running…';
@@ -511,7 +552,7 @@
 
         const data = await res.json();
         renderResults(data.results || []);
-        status.textContent = `${(data.results || []).length} statement(s) executed`;
+        status.textContent = `${(data.results || []).length} statement(s) executed` + (mode === 'current' ? ' (current)' : '');
         loadTables(); // Refresh schema in case of DDL
       } catch (e) {
         resultsPanel.innerHTML = `<div class="text-output error">Network error: ${escapeHtml(e.message)}</div>`;

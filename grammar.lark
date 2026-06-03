@@ -65,6 +65,11 @@ SHOW : "show"i
 UPDATE : "update"i
 SET : "set"i
 
+BEGIN : "begin"i
+COMMIT : "commit"i
+ROLLBACK : "rollback"i
+TRANSACTION : "transaction"i
+
 EXIT : "exit"i
 
 
@@ -83,6 +88,9 @@ query : create_table_query
       | update_query
       | create_index_query
       | drop_index_query
+      | begin_transaction_query
+      | commit_query
+      | rollback_query
 
 
 // CREATE TABLE
@@ -160,6 +168,11 @@ null_operation : IS [NOT] NULL
 
 // SHOW TABLES
 show_tables_query : SHOW TABLES
+
+// TRANSACTION
+begin_transaction_query : BEGIN [TRANSACTION]
+commit_query : COMMIT
+rollback_query : ROLLBACK
 
 // UPDATE
 update_query : UPDATE table_name SET assignment [where_clause]

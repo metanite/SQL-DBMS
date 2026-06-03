@@ -23,17 +23,48 @@ python run.py
 ```
 
 ### Run in Docker (recommended for a consistent, cross-platform setup)
-The repo ships a `Dockerfile`, `docker-compose.yml`, and `Makefile` so everyone runs the same environment regardless of host OS:
-```
-make build      # build the image (once)
-make run        # start the interactive SQL REPL
-make shell      # open a shell inside the container
-make test       # pipe a few statements through the engine as a smoke test
-make reset      # wipe the database volume
-```
-VS Code / Cursor users can instead "Reopen in Container" (see `.devcontainer/`).
+The repo ships a `Dockerfile`, `docker-compose.yml`, and `Makefile` so everyone runs the same environment regardless of host OS.
 
-> Note: table and column **identifiers must start with a letter and contain only letters and underscores** — names like `t2` are rejected by the grammar as a syntax error. Use `account`, `students`, etc.
+#### Quick-start (Makefile targets)
+```bash
+make build      # build the image (once, or after changing requirements.txt / Dockerfile)
+make run        # start the interactive SQL REPL
+make shell      # open a bash shell inside the container
+make test       # pipe a few statements through the engine as a smoke test
+make reset      # wipe the database volume and start from a clean slate
+```
+
+#### Two run modes
+
+**1. Interactive SQL REPL** (`run.py`)
+```bash
+make run
+# or directly:
+docker compose run --rm app python run.py
+```
+You will see a `DB_2023-12345>` prompt where you can type SQL statements.
+
+**2. Web UI** (`web_ui.py` — Flask app on port 5000)
+```bash
+docker compose up        # start the web UI (Ctrl+C to stop)
+docker compose up -d     # start detached
+```
+Open [http://localhost:5000](http://localhost:5000) in your browser.
+
+#### How the container is wired up
+- **Source code** is mounted as a volume (`./app`), so edits you make on the host are reflected instantly inside the container — no rebuild needed between iterations.
+- **Database files** live in a named Docker volume (`dbdata`) mounted at `/app/DB`. This keeps the binary `dbm` files out of git and avoids host/container file-format clashes.
+- **Port 5000** is exposed for the web UI.
+
+#### VS Code / Cursor dev container
+Users of VS Code or Cursor can open the project in the pre-configured dev container:
+1. Open the Command Palette (`Ctrl+Shift+P`).
+2. Select **"Dev Containers: Reopen in Container"**.
+3. The editor, terminal, and any AI agents all run *inside* the container — dependencies are pre-installed, so `python run.py` just works with zero host setup.
+
+See `.devcontainer/devcontainer.json` for the container configuration.
+
+> **Note:** table and column **identifiers must start with a letter and contain only letters and underscores** — names like `t2` are rejected by the grammar as a syntax error. Use `account`, `students`, etc.
 
 ## Sample I/O
 

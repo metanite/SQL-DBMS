@@ -52,6 +52,33 @@ class DropIndexSuccess(SuccessLog):
         super().__init__(f"Index '{self.index_name}' is dropped")
 
 
+class BeginTransactionSuccess(SuccessLog):
+    def __init__(self):
+        super().__init__("Transaction started")
+
+
+class CommitSuccess(SuccessLog):
+    def __init__(self):
+        super().__init__("Transaction committed")
+
+
+class RollbackSuccess(SuccessLog):
+    def __init__(self):
+        super().__init__("Transaction rolled back")
+
+
+class UpdateResult(SuccessLog):
+    def __init__(self, num_updated):
+        self.num_updated = num_updated
+        super().__init__(f"'{self.num_updated}' row(s) are updated")
+
+
+class UpdateReferentialIntegrityPassed(SuccessLog):
+    def __init__(self, num_skipped):
+        self.num_skipped = num_skipped
+        super().__init__(f"'{self.num_skipped}' row(s) are not updated due to referential integrity")
+
+
 # ---------------------------------------------------------------------------- #
 #                       Failure messages in DBMS                               #
 # ---------------------------------------------------------------------------- #
@@ -216,3 +243,47 @@ class IndexColumnNotExist(Exception):
     def __init__(self, column_name):
         self.column_name = column_name
         super().__init__(f"Create index has failed: '{column_name}' does not exist")
+
+
+class NoActiveTransaction(Exception):
+    """Raised when COMMIT or ROLLBACK is called without an active transaction."""
+    def __init__(self):
+        super().__init__("No active transaction")
+
+
+class TransactionAlreadyActive(Exception):
+    """Raised when BEGIN is called while a transaction is already active."""
+    def __init__(self):
+        super().__init__("Transaction already active")
+
+
+class UpdateTypeMismatchError(Exception):
+    """Raised when the type of the value does not match the type of the column."""
+    def __init__(self):
+        super().__init__("Update has failed: Types are not matched")
+
+
+class UpdateColumnExistenceError(Exception):
+    """Raised when the column does not exist in the table."""
+    def __init__(self, column_name):
+        self.column_name = column_name
+        super().__init__(f"Update has failed: '{self.column_name}' does not exist")
+
+
+class UpdateColumnNonNullableError(Exception):
+    """Raised when the column is non nullable and the value is null."""
+    def __init__(self, column_name):
+        self.column_name = column_name
+        super().__init__(f"Update has failed: '{self.column_name}' is not nullable")
+
+
+class UpdateDuplicatePrimaryKeyError(Exception):
+    """Raised when the primary key value already exists in the table."""
+    def __init__(self):
+        super().__init__("Update has failed: Primary key duplication")
+
+
+class UpdateReferentialIntegrityError(Exception):
+    """Raised when the foreign key constraint is violated."""
+    def __init__(self):
+        super().__init__("Update has failed: Referential integrity violation")
